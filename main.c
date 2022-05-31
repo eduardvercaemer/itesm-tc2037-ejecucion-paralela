@@ -54,8 +54,10 @@ static void calculateThreaded(unsigned long limit, unsigned tCount) {
   unsigned long step = limit / tCount;
   for (unsigned i = 0; i < tCount; ++i) {
     pDataArray[i].start = start;
-    pDataArray[i].end = start + step;
-    start += step;
+    unsigned long end = start + step;
+    if (i + 1 == tCount) end = limit;
+    pDataArray[i].end = end;
+    start = end;
 
     hThreadArray[i] = CreateThread(
         NULL,
