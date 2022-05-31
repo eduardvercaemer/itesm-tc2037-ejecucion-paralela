@@ -3,47 +3,113 @@
 
 #include <windows.h>
 
+// slow function to check prime numbers
+static int isPrime(unsigned long n) {
+  for (unsigned long i = 2; i < n; ++i) {
+    if (n % i == 0) return 0;
+  }
+
+  return 1;
+}
+
+// add all prime numbers between the given limits
+static unsigned long addPrimes(unsigned long start, unsigned long end) {
+  unsigned long sum = 0;
+  for (; start < end; ++start) {
+    if (isPrime(start)) sum += start;
+  }
+
+  return sum;
+}
+
 typedef struct TData {
-  int val1, val2;
+  unsigned long start, end;
+  unsigned long sum;
 } TDATA, *PTDATA;
 
-DWORD WINAPI myProc(PTDATA data) {
-  printf("hello from thread %d (val: %d)\n", data->val1, data->val2);
+static void calculateSimple(unsigned long limit) {
+  const unsigned long sum = addPrimes(0, limit);
+  printf("calculate simple (%d): %d\n", limit, sum);
+}
+
+DWORD WINAPI threadAddPrimes(PTDATA data) {
+  const unsigned long sum = addPrimes(data->start, data->end);
+  data->sum = sum;
   return 0;
 }
 
-#define T_COUNT 10
+static void calculateThreaded(unsigned long limit, unsigned tCount) {
+  PTDATA pDataArray = calloc(tCount, sizeof(TDATA));
+  PHANDLE hThreadArray = calloc(tCount, sizeof(HANDLE));
 
-int main() {
-  PTDATA pDataArray[T_COUNT];
-  DWORD dwThreadIdArray[T_COUNT];
-  HANDLE hThreadArray[T_COUNT];
-
-  for (int i = 0; i < T_COUNT; ++i) {
-    pDataArray[i] = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(TDATA));
-    if (!pDataArray[i]) ExitProcess(2);
-
-    pDataArray[i]->val1 = i;
-    pDataArray[i]->val2 = i + 100;
+  if (!pDataArray || !hThreadArray) ExitProcess(2);
+  
+  unsigned long start = 0;
+  unsigned long step = limit / tCount;
+  for (unsigned i = 0; i < tCount; ++i) {
+    pDataArray[i].start = start;
+    pDataArray[i].end = start + step;
+    start += step;
 
     hThreadArray[i] = CreateThread(
         NULL,
         0,
-        myProc,
-        pDataArray[i],
+        threadAddPrimes,
+        &pDataArray[i],
         0,
-        &dwThreadIdArray[i]);
+        NULL);
+
     if (!hThreadArray[i]) ExitProcess(3);
   }
 
-  WaitForMultipleObjects(T_COUNT, hThreadArray, TRUE, INFINITE);
+  WaitForMultipleObjects(tCount, hThreadArray, TRUE, INFINITE);
 
-  for (int i = 0; i < T_COUNT; ++i) {
+  unsigned long total = 0;
+  for (unsigned i = 0; i < tCount; ++i) {
+    total += pDataArray[i].sum;
+  }
+
+  printf("calculate threaded (%dt, %d): %d\n", tCount, limit, total);
+
+  for (unsigned i = 0; i < tCount; ++i) {
     CloseHandle(hThreadArray[i]);
-    if (pDataArray[i]) {
-      HeapFree(GetProcessHeap(), 0, pDataArray[i]);
-      pDataArray[i] = NULL;
-    }
+  }
+
+  free(hThreadArray);
+  free(pDataArray);
+}
+
+int main(int argc, char **argv) {
+  unsigned long long limit;
+  unsigned tCount;
+
+  LARGE_INTEGER frequency;
+  LARGE_INTEGER start;
+  LARGE_INTEGER end;
+  double interval;
+
+  const char *mode = argv[1];
+  if (strcmp(mode, "simple") == 0) {
+    limit = strtoull(argv[2], NULL, 10);
+
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&start);
+    calculateSimple(limit);
+    QueryPerformanceCounter(&end);
+    interval = (double) (end.QuadPart - start.QuadPart) / frequency.QuadPart;
+    printf("time: %f\n", interval);
+  } else if (strcmp(mode, "threaded") == 0) {
+    limit = strtoull(argv[2], NULL, 10);
+    tCount = strtoul(argv[3], NULL, 10);
+
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&start);
+    calculateThreaded(limit, tCount);
+    QueryPerformanceCounter(&end);
+    interval = (double) (end.QuadPart - start.QuadPart) / frequency.QuadPart;
+    printf("time: %f\n", interval);
+  } else {
+    ExitProcess(5);
   }
 
   return EXIT_SUCCESS;
